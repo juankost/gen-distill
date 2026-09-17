@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gen-distill"
+version = "0.1.0"
+description = "Inference and evaluation code for distilled hybrid sequence models (Mamba2 + Kimi Delta Attention)"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    {name = "Juan Gabriel Kostelec"},
+]
+
+# These are the packages `import gen_distill` actually needs; all of them are
+# imported unconditionally at load time.
+#
+# `setup.sh` is the supported way to install them, and it does NOT resolve this
+# list with pip. Three of these entries cannot be satisfied by a plain
+# `pip install .`:
+#   * mamba-ssm and causal-conv1d publish sdists only on PyPI, and their setup.py
+#     imports torch, so they need a prebuilt wheel or --no-build-isolation plus
+#     nvcc. setup.sh installs the upstream GitHub release wheels.
+#   * flash-linear-attention is pulled from git, not PyPI: the published PyPI
+#     artifacts from 0.3.x onward contain fla/layers and fla/models but no
+#     fla/ops, so `from fla.ops.kda import chunk_kda` fails against them.
+#
+# triton is deliberately absent: FLA's chunk kernels need >=3.4.0 on Blackwell
+# sm_120, but torch 2.7.0 hard-pins triton==3.3.0, so declaring it here makes
+# pip's resolver fail. setup.sh forces the bump after torch is installed.
+dependencies = [
+    "torch>=2.7",
+    "transformers==4.54.1",
+    "safetensors",
+    "einops",
+    "mamba-ssm==2.3.0",
+    # Not optional in practice: the short-convolution layer defaults to
+    # backend='cuda' and, when this package is missing, falls through to a
+    # Triton path that dispatches to fla.ops.triton.causal_conv1d, a module
+    # current FLA no longer ships. The result is a TypeError at the first
+    # forward rather than a pure-PyTorch fallback.
+    "causal-conv1d==1.6.0",
+    "flash-linear-attention @ git+https://github.com/fla-org/flash-linear-attention@e91af3c61de0ed8fd5604c9a1a40cd3c56ef7911",
+]
+
+[project.optional-dependencies]
+# Needed by gen_distill/evals/ and scripts/. The lm_eval extras cover the
+# harness task families the shipped scripts run: ruler for eval_on_ruler.sh,
+# longbench for eval_on_longbench.sh.
+eval = [
+    "lm_eval[ruler,longbench]==0.4.9.2",
+    "datasets==3.6.0",
+    # Pinned to the version the paper's runs used. evalscope >=1.8 rejects few-shot for
+    # mmlu_redux ("does not support few-shot evaluation; set few_shot_num=0"), and the
+    # paper evaluates MMLU-Redux 5-shot, so a newer release changes the protocol.
+    # The [ifeval] extra pulls langdetect, without which the IFEval benchmark raises
+    # ImportError at adapter construction, before any generation happens.
+    "evalscope[ifeval]==1.7.1",
+    "modelscope",
+    "accelerate",
+    "jinja2",
+    "numpy",
+]
+
+[tool.setuptools.packages.find]
+include = ["gen_distill*"]
